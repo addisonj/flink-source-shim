@@ -26,7 +26,7 @@ public interface Source<OUT, SplitT extends SourceSplit, EnumChkT> extends Seria
    * Creates a new reader to read data from the spits it gets assigned. The reader starts fresh and
    * does not have any state to resume.
    */
-  SourceReader<SplitT, OUT> createReader(SourceFunction.SourceContext ctx) throws IOException;
+  SourceReader<SplitT, OUT> createReader(SourceFunction.SourceContext<OUT> ctx) throws IOException;
 
   /** Creates a new SplitEnumerator for this source, starting a new input. */
   SplitEnumerator<SplitT, EnumChkT> createEnumerator(Boundedness mode) throws IOException;

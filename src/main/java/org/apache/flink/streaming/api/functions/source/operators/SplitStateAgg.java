@@ -28,11 +28,8 @@ public class SplitStateAgg<SplitT extends SourceSplit>
       Optional<ReaderState<SplitT>> existingState = accumulator.getReaderState(readerName.get());
       ReaderState<SplitT> updatedState;
       if (existingState.isPresent()) {
-        if (value.getReaderState().isPresent() && value.getSplitUpdates().isPresent()) {
-          updatedState =
-              existingState
-                  .get()
-                  .updateState(value.getReaderState().get(), value.getSplitUpdates().get());
+        if (value.getReaderState().isPresent()) {
+          updatedState = existingState.get().updateState(value.getReaderState().get());
         } else {
           throw new RuntimeException("reader did not provide a state or split updates");
         }

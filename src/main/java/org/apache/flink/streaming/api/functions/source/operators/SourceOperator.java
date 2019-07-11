@@ -16,6 +16,7 @@ import org.apache.flink.runtime.taskexecutor.GlobalAggregateManager;
 import org.apache.flink.streaming.api.checkpoint.CheckpointedFunction;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.streaming.api.functions.source.PeriodicSplitEnumerator;
 import org.apache.flink.streaming.api.functions.source.RichSourceFunction;
 import org.apache.flink.streaming.api.functions.source.Source;
 import org.apache.flink.streaming.api.functions.source.SplitEnumerator;
@@ -71,42 +72,32 @@ public class SourceOperator<SplitT extends SourceSplit, OUT, EnumCheckT> {
     }
 
     @Override
+    @SuppressWarnings("unchecked")
     public void run(SourceContext<ReadRequest<SplitT>> ctx) throws Exception {
       isRunning = true;
-      while (isRunning) {
-        while (!enumerator.isEndOfInput()) {
-          if (!isRunning) {
-            break;
-          }
+      while (!enumerator.isEndOfInput() && isRunning) {
 
-          // TODO this is a bit naive perhaps... but it works for now
-          globalAgg
-              .updateGlobalAggregate(globalAggName, SourceStateCommand.querySplit(), aggFunc)
-              .getWaitingReaders()
-              .forEach(
-                  (reader) -> {
-                    ReaderLocation loc = reader.getLocation();
-                    synchronized (ctx.getCheckpointLock()) {
-                      Optional<SplitT> nextSplit = enumerator.nextSplit(loc);
-                      nextSplit.ifPresent(pendingSplits::add);
-                      nextSplit
-                          .map((split) -> new ReadRequest<>(split, loc))
-                          .ifPresent(ctx::collect);
-                    }
-                  });
-
-          Thread.sleep(1000);
-        }
-
-        // done with splits, just wait until all splits are finished
-        SplitQuery newState =
-            globalAgg.updateGlobalAggregate(
-                globalAggName, SourceStateCommand.querySplit(), aggFunc);
-        if (newState.getUnfinishedSplits().isEmpty()) {
-          break;
-        }
+        // TODO this is a bit naive perhaps... but it works for now
+        globalAgg
+            .updateGlobalAggregate(globalAggName, SourceStateCommand.querySplit(), aggFunc)
+            .getWaitingReaders()
+            .forEach(
+                (reader) -> {
+                  ReaderLocation loc = reader.getLocation();
+                  synchronized (ctx.getCheckpointLock()) {
+                    Optional<SplitT> nextSplit = enumerator.nextSplit(loc);
+                    nextSplit.ifPresent(pendingSplits::add);
+                    nextSplit.map((split) -> new ReadRequest<>(split, loc)).ifPresent(ctx::collect);
+                  }
+                });
 
         Thread.sleep(1000);
+        if (enumerator instanceof PeriodicSplitEnumerator) {
+          ((PeriodicSplitEnumerator<SplitT, EnumCheckT>) enumerator).discoverMoreSplits();
+        }
+      }
+      synchronized (ctx.getCheckpointLock()) {
+        ctx.collect(ReadRequest.LAST_SPLIT);
       }
     }
 

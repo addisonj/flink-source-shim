@@ -2,7 +2,6 @@ package org.apache.flink.streaming.api.functions.source.operators;
 
 import org.apache.flink.streaming.api.functions.source.types.SourceSplit;
 
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -31,15 +30,6 @@ public class SplitQuery<SplitT extends SourceSplit> {
 
   public Optional<ReaderState<SplitT>> getReaderState(String name) {
     return Optional.ofNullable(readerStates.get(name));
-  }
-
-  public List<ReaderSplit<SplitT>> getUnfinishedSplits() {
-    ArrayList<ReaderSplit<SplitT>> unfinished = new ArrayList<>();
-    readerStates.forEach(
-        (k, v) -> {
-          unfinished.addAll(v.getUnfinishedSplits());
-        });
-    return unfinished;
   }
 
   public List<ReaderState<SplitT>> getWaitingReaders() {

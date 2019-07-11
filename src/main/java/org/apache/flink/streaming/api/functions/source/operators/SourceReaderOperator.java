@@ -1,8 +1,10 @@
 package org.apache.flink.streaming.api.functions.source.operators;
 
+import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.state.ListState;
 import org.apache.flink.api.common.state.ListStateDescriptor;
 import org.apache.flink.api.common.typeinfo.PrimitiveArrayTypeInfo;
+import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.runtime.state.StateSnapshotContext;
 import org.apache.flink.runtime.taskexecutor.GlobalAggregateManager;
@@ -15,6 +17,7 @@ import org.apache.flink.streaming.api.functions.source.types.ReaderStatus;
 import org.apache.flink.streaming.api.functions.source.types.SourceSplit;
 import org.apache.flink.streaming.api.operators.AbstractStreamOperator;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
+import org.apache.flink.streaming.api.operators.OutputTypeConfigurable;
 import org.apache.flink.streaming.api.operators.StreamSourceContexts;
 import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
@@ -30,7 +33,9 @@ import java.util.concurrent.ExecutionException;
 
 public class SourceReaderOperator<SplitT extends SourceSplit, OUT>
     extends AbstractStreamOperator<OUT>
-    implements OneInputStreamOperator<ReadRequest<SplitT>, OUT>, ProcessingTimeCallback {
+    implements OneInputStreamOperator<ReadRequest<SplitT>, OUT>,
+        ProcessingTimeCallback,
+        OutputTypeConfigurable<OUT> {
   private final long WORKER_CHECK_INT = 1000L;
   private final String SPLIT_STATE_NAME = "split_states";
 
@@ -38,12 +43,15 @@ public class SourceReaderOperator<SplitT extends SourceSplit, OUT>
   private final SplitStateAgg<SplitT> aggFunc;
   private final String globalAggName;
 
+  private String readerName;
   private ListState<byte[]> splitStates;
   private GlobalAggregateManager globalAgg;
   private ReaderWorker worker;
   private Thread workerThread;
   private SourceFunction.SourceContext<OUT> srcCtx;
   private Exception workerException;
+  private TypeInformation<OUT> outputTypeInfo;
+  private ExecutionConfig executionConfig;
 
   protected SourceFunction.SourceContext<OUT> buildSourceContext(Long idleTimeout) {
     return StreamSourceContexts.getSourceContext(
@@ -67,6 +75,9 @@ public class SourceReaderOperator<SplitT extends SourceSplit, OUT>
     super.open();
     srcCtx = buildSourceContext(-1L);
     SourceReader<SplitT, OUT> reader = source.createReader(srcCtx);
+    if (reader instanceof OutputTypeConfigurable) {
+      ((OutputTypeConfigurable) reader).setOutputType(outputTypeInfo, executionConfig);
+    }
     List<SplitT> initialSplits = new ArrayList<>();
     for (byte[] splitBytes : splitStates.get()) {
       initialSplits.add(source.getSplitSerializer().deserialize(1, splitBytes));
@@ -77,7 +88,7 @@ public class SourceReaderOperator<SplitT extends SourceSplit, OUT>
     // every second, check on our worker thread, units are mills
     getProcessingTimeService().scheduleAtFixedRate(this, WORKER_CHECK_INT, WORKER_CHECK_INT);
     // signal to the global state we are ready for splits
-    String readerName =
+    readerName =
         getOperatorName()
             + "-"
             + getRuntimeContext().getIndexOfThisSubtask()
@@ -103,8 +114,9 @@ public class SourceReaderOperator<SplitT extends SourceSplit, OUT>
     }
   }
 
-  protected requestMoreSplits() {
-    globalAgg.updateGlobalAggregate(globalAggName, SourceStateCommand.notifyAndRequestMore())
+  protected void requestMoreSplits() throws IOException {
+    globalAgg.updateGlobalAggregate(
+        globalAggName, SourceStateCommand.notifyAndRequestMore(readerName), aggFunc);
   }
 
   @Override
@@ -140,6 +152,12 @@ public class SourceReaderOperator<SplitT extends SourceSplit, OUT>
                     SPLIT_STATE_NAME, PrimitiveArrayTypeInfo.BYTE_PRIMITIVE_ARRAY_TYPE_INFO));
   }
 
+  @Override
+  public void setOutputType(TypeInformation<OUT> outTypeInfo, ExecutionConfig executionConfig) {
+    this.outputTypeInfo = outTypeInfo;
+    this.executionConfig = executionConfig;
+  }
+
   class SourceOutputImpl implements SourceOutput<OUT> {
     private final SourceFunction.SourceContext<OUT> ctx;
 
@@ -171,9 +189,8 @@ public class SourceReaderOperator<SplitT extends SourceSplit, OUT>
   class SplitContextImpl implements SplitContext {
 
     @Override
-    public void requestNewSplit() {
-
-
+    public void requestNewSplit() throws IOException {
+      requestMoreSplits();
     }
   }
 
@@ -186,7 +203,10 @@ public class SourceReaderOperator<SplitT extends SourceSplit, OUT>
     private boolean running;
     private Exception errorExp;
 
-    public ReaderWorker(SourceReader<SplitT, OUT> reader, SourceFunction.SourceContext<OUT> ctx, List<SplitT> initialSplits) {
+    public ReaderWorker(
+        SourceReader<SplitT, OUT> reader,
+        SourceFunction.SourceContext<OUT> ctx,
+        List<SplitT> initialSplits) {
       this.reader = reader;
       this.ctx = ctx;
       this.initialSplits = initialSplits;
@@ -213,10 +233,11 @@ public class SourceReaderOperator<SplitT extends SourceSplit, OUT>
 
     @Override
     public void run() {
+      // TODO: refactor this to use a mailbox
       running = true;
       try {
         reader.addSplits(initialSplits);
-        reader.start();
+        reader.start(new SplitContextImpl());
       } catch (IOException exp) {
         errorExp = new RuntimeException("failed when starting", exp);
         running = false;

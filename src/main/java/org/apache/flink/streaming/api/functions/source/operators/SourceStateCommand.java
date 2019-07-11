@@ -3,7 +3,6 @@ package org.apache.flink.streaming.api.functions.source.operators;
 import org.apache.flink.streaming.api.functions.source.types.ReaderLocation;
 import org.apache.flink.streaming.api.functions.source.types.SourceSplit;
 
-import java.util.List;
 import java.util.Optional;
 
 public class SourceStateCommand<SplitT extends SourceSplit> {
@@ -11,7 +10,6 @@ public class SourceStateCommand<SplitT extends SourceSplit> {
   private String readerName;
   private ReaderLocation location;
   private ReaderCommandState readerState;
-  private List<ReaderSplit<SplitT>> splitUpdates;
 
   private SourceStateCommand(SourceStateCommands type) {
     this.type = type;
@@ -33,10 +31,6 @@ public class SourceStateCommand<SplitT extends SourceSplit> {
     return Optional.ofNullable(readerState);
   }
 
-  public Optional<List<ReaderSplit<SplitT>>> getSplitUpdates() {
-    return Optional.ofNullable(splitUpdates);
-  }
-
   public static <SplitT extends SourceSplit> SourceStateCommand<SplitT> querySplit() {
     return new SourceStateCommand<>(SourceStateCommands.GET_STATE);
   }
@@ -52,22 +46,21 @@ public class SourceStateCommand<SplitT extends SourceSplit> {
   }
 
   public static <SplitT extends SourceSplit> SourceStateCommand<SplitT> notifyAndRequestMore(
-      String readerName, List<ReaderSplit<SplitT>> updates) {
-    return readerUpdateCommand(readerName, ReaderCommandState.SEND_MORE, updates);
+      String readerName) {
+    return readerUpdateCommand(readerName, ReaderCommandState.SEND_MORE);
   }
 
   public static <SplitT extends SourceSplit> SourceStateCommand<SplitT> notifyAndFinished(
-      String readerName, List<ReaderSplit<SplitT>> updates) {
-    return readerUpdateCommand(readerName, ReaderCommandState.FINISHED, updates);
+      String readerName) {
+    return readerUpdateCommand(readerName, ReaderCommandState.FINISHED);
   }
 
   private static <SplitT extends SourceSplit> SourceStateCommand<SplitT> readerUpdateCommand(
-      String readerName, ReaderCommandState state, List<ReaderSplit<SplitT>> updates) {
+      String readerName, ReaderCommandState state) {
     SourceStateCommand<SplitT> updateCommand =
         new SourceStateCommand<>(SourceStateCommands.UPDATE_READER_STATE);
     updateCommand.readerName = readerName;
     updateCommand.readerState = state;
-    updateCommand.splitUpdates = updates;
     return updateCommand;
   }
 

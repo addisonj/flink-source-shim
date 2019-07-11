@@ -61,6 +61,12 @@ public interface SourceReader<SplitT, OUT> {
   void addSplits(List<SplitT> splits) throws IOException;
 
   /**
+   * Called to indicate that the enumerator has finished generating splits. Only called if this
+   * source is a "Bounded" source
+   */
+  void enumeratorFinished();
+
+  /**
    * Should return a representation of splits, SplitT should also have progress (probably?) in the
    * event of restore
    *
